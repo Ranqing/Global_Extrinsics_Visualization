@@ -33,8 +33,9 @@ public:
 
     void read_stereo_extrinsics();
 
-
-    void visualizer_by_ply();
+    vector<cv::Vec3f> m_xaxis_points, m_yaxis_points, m_zaxis_points;
+    void calc_axes_points();
+    void visualizer_by_ply(const string& plyname);
 };
 
 #endif // GLOBAL_EXTRINSICS_VISUALIZER_H

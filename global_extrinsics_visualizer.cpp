@@ -3,6 +3,7 @@
 #include "../../../Qing/qing_string.h"
 #include "../../../Qing/qing_basic.h"
 #include "../../../Qing/qing_io.h"
+#include "../../../Qing/qing_ply.h"
 
 void qing_read_sfm_pmatrix(const string filename, Mat& rotation, Mat& translation)
 {
@@ -45,6 +46,14 @@ void qing_read_sfm_pmatrix(const string filename, Mat& rotation, Mat& translatio
     translation.create(3,1,CV_64FC1);
     memcpy(translation.data, tdata, sizeof(double)*3);
 }
+
+
+Mat qing_cam_coord_to_world_coord(const Mat& rotation, const Mat& translation, const Mat& c_coord)
+{
+    Mat w_coord = rotation.t() * (c_coord - translation);
+    return w_coord;
+}
+
 
 Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string &sfm_folder, const string &ocv_folder, const int num, const string *names):
     m_sfm_folder(sfm_folder), m_ocv_folder(ocv_folder), m_cam_num(num)
@@ -120,8 +129,8 @@ void Qing_Extrinsics_Visualizer::calc_camera_orientations()
 
    for(int i = 0; i < m_cam_num; ++i)
    {
-       Mat c_coord = (Mat_<double>(3,1) << 1.0, 0.0, 0.0);      //camera_coord
-       Mat w_coord = m_rotations[i].t() * (c_coord - m_translations[i]);
+       Mat c_coord = (Mat_<double>(3,1) << 1.0, 0.0, 0.0);                                              //camera_coord
+       Mat w_coord = qing_cam_coord_to_world_coord(m_rotations[i], m_translations[i], c_coord) ;        //m_rotations[i].t() * (c_coord - m_translations[i]);
 
        m_cam_orientations[i] = w_coord.clone();
 
@@ -167,4 +176,88 @@ void Qing_Extrinsics_Visualizer::read_stereo_extrinsics()
         cout << translation << endl;
 #endif
     }
+}
+
+#define STEP 0.005
+
+void Qing_Extrinsics_Visualizer::calc_axes_points()
+{
+    m_xaxis_points.clear();
+    m_yaxis_points.clear();
+    m_zaxis_points.clear();
+
+    int pointsize = 0.1/STEP;
+
+    for(int c = 0; c < m_cam_num; c++)
+    {
+        Mat rotation = m_rotations[c];
+        Mat translation = m_translations[c];
+
+        //x-axis
+        double cur = 0.0;
+        for(int i = 0; i < pointsize; i++, cur += STEP)
+        {
+            Mat c_coord = (Mat_<double>(3,1) << cur, 0.0, 0.0);
+            Mat w_coord = qing_cam_coord_to_world_coord(rotation, translation, c_coord);    //cam_coord to world_coord
+
+            double * wdata = (double *)w_coord.ptr<double>(0);
+            m_xaxis_points.push_back(Vec3f(wdata[0], wdata[1], wdata[2]));
+        }
+
+        //y-axis
+        cur = 0.0;
+        for(int i = 0; i < pointsize; i++, cur += STEP)
+        {
+            Mat c_coord = (Mat_<double>(3,1) << 0.0, cur, 0.0);
+            Mat w_coord = qing_cam_coord_to_world_coord(rotation, translation, c_coord);    //cam_coord to world_coord
+
+            double * wdata = (double *)w_coord.ptr<double>(0);
+            m_yaxis_points.push_back(Vec3f(wdata[0], wdata[1], wdata[2]));
+        }
+
+        //z-axis
+        cur = 0.0;
+        for(int i = 0; i < pointsize; i++, cur += STEP)
+        {
+            Mat c_coord = (Mat_<double>(3,1) << 0.0, 0.0, cur);
+            Mat w_coord = qing_cam_coord_to_world_coord(rotation, translation, c_coord);    //cam_coord to world_coord
+
+            double * wdata = (double *)w_coord.ptr<double>(0);
+            m_zaxis_points.push_back(Vec3f(wdata[0], wdata[1], wdata[2]));
+        }
+    }
+    cout << "x-axis point size: " << m_xaxis_points.size() << endl;
+    cout << "y-axis point size: " << m_yaxis_points.size() << endl;
+    cout << "z-axis point size: " << m_zaxis_points.size() << endl;
+}
+
+void Qing_Extrinsics_Visualizer::visualizer_by_ply(const string& plyname)
+{
+    calc_axes_points();
+    vector<Vec3f> all_points(0);
+    vector<Vec3f> all_colors(0);
+
+    int totalsize = m_xaxis_points.size() + m_yaxis_points.size() + m_zaxis_points.size();
+    all_points.reserve(totalsize);
+    all_colors.reserve(totalsize);
+
+    //x-axis
+    std::copy(m_xaxis_points.begin(), m_xaxis_points.end(), back_inserter(all_points));
+    for(int i = 0; i < m_xaxis_points.size(); ++i) {
+        all_colors.push_back(Vec3f(255.f, 0.f, 0.f));
+    }
+
+    //y-axis
+    std::copy(m_yaxis_points.begin(), m_yaxis_points.end(), back_inserter(all_points));
+    for(int i = 0; i < m_yaxis_points.size(); ++i) {
+        all_colors.push_back(Vec3f(0.f, 255.f, 0.f));
+    }
+
+    //z-axis
+    std::copy(m_zaxis_points.begin(), m_zaxis_points.end(), back_inserter(all_points));
+    for(int i = 0; i < m_zaxis_points.size(); ++i) {
+        all_colors.push_back(Vec3f(0.f, 0.f, 255.f));
+    }
+
+    qing_write_point_color_ply(plyname, all_points, all_colors);
 }

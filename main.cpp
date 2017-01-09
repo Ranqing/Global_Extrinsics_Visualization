@@ -33,6 +33,9 @@ int main(int argc, char * argv[])
     savefile = "./camera_pose.xyz";
     visualizer->save_camera_poses(savefile);
 
+    savefile = "./camera_pose.ply";
+    visualizer->visualizer_by_ply(savefile);
+
 
     return 1;
 }
