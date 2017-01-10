@@ -40,7 +40,9 @@ int main(int argc, char * argv[])
 # endif
 
     string calibfolder = "../../../HumanDatas_20161224/calib_rectified";
-    visualizer->triangulate_chessboard(calibfolder);
+    visualizer->sfm_triangulate_chessboard(calibfolder);
+    string evalfile = "./eval_sfm_extrinsics.txt";
+    visualizer->eval_sfm_triangulation(evalfile);
 
     return 1;
 }

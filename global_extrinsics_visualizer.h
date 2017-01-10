@@ -45,11 +45,13 @@ public:
 # if EVAL
     //reconstruct chessboard which size is 20mm
     //1-demension: stereo idx, 0 ~ stereo_size
-    //2-demension: order by point idx then by frame idx, 0 ~ frame_size * point_size
+    //2-demension: frame idx,  0 ~ frame_size
+    //3-demension: point idx,  0 ~ point_size
     Size m_board_size;
-    vector<vector<cv::Vec3f> > m_chessboard_points;
-    void triangulate_chessboard(const string calibfolder);
-    void triangulate_chessboard(const string calibfolder, const int camidx0, const int camidx1, vector<Vec3f>& chessboard);
+    vector<vector<vector<cv::Vec3f> > > m_chessboard_points;
+    void sfm_triangulate_chessboard(const string calibfolder);
+    void sfm_triangulate_chessboard(const string calibfolder, const int camidx0, const int camidx1, vector<vector<Vec3f> >& total_chessboard);
+    void eval_sfm_triangulation(const string evalfile);
 #endif
 };
 

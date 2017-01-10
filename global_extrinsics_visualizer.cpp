@@ -103,6 +103,45 @@ bool qing_extract_corners(const string& imgname, const Size& boardSize, vector<P
     return true;
 }
 
+void qing_calc_recons_error(vector<Vec3f>& object_points, Size board_size, double& total_recons_err, double& max_recons_err)
+{
+    int w = board_size.width;
+    int h = board_size.height;
+
+    //horizon
+    for(int i = 0; i < h; ++i)
+    {
+        for(int j = 0; j < w-1; ++j)
+        {
+            int idx0 = i * w + j;
+            int idx1 = idx0 + 1;
+
+            float dis = qing_euclidean_dis(object_points[idx1] , object_points[idx0]);
+            total_recons_err += dis;
+
+            if(dis > max_recons_err)  max_recons_err = dis;
+        }
+    }
+
+    // vertical
+    for(int i = 0; i < h-1; ++i)
+    {
+        for(int j = 0; j < w; ++j)
+        {
+            int idx0 = i * w + j;
+            int idx1 = idx0 + w;
+
+            float dis = qing_euclidean_dis(object_points[idx1] , object_points[idx0]);
+            total_recons_err += dis;
+
+            if(dis > max_recons_err )  max_recons_err = dis;
+        }
+    }
+
+  //  cout << "max_recons_err = " << max_recons_err << endl;
+}
+
+
 Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string &sfm_folder, const string &ocv_folder, const int num, const string *names):
     m_sfm_folder(sfm_folder), m_ocv_folder(ocv_folder), m_cam_num(num)
 {
@@ -340,17 +379,19 @@ void Qing_Extrinsics_Visualizer::visualizer_by_ply(const string& plyname)
     qing_write_point_color_ply(plyname, all_points, all_colors);
 }
 
-void Qing_Extrinsics_Visualizer::triangulate_chessboard(const string calibfolder)
+void Qing_Extrinsics_Visualizer::sfm_triangulate_chessboard(const string calibfolder)
 {
     m_chessboard_points.clear();
     m_chessboard_points.resize(m_cam_num/2);
     for(int i = 0; i < m_cam_num - 1; i += 2)
     {
-        triangulate_chessboard(calibfolder, i+0, i+1, m_chessboard_points[i/2]);
+        m_chessboard_points[i/2].clear();
+        sfm_triangulate_chessboard(calibfolder, i+0, i+1, m_chessboard_points[i/2]);
+        cout << "finish all frames' triangulation.." << m_chessboard_points[i/2].size() << " frames." << endl;
     }
 }
 
-void Qing_Extrinsics_Visualizer::triangulate_chessboard(const string calibfolder, const int camidx0 , const int camidx1, vector<Vec3f>& total_chessboard)
+void Qing_Extrinsics_Visualizer::sfm_triangulate_chessboard(const string calibfolder, const int camidx0 , const int camidx1, vector<vector<Vec3f> >& total_chessboard)
 {
     string cam0 = m_cam_names[camidx0].substr(0,1) + m_cam_names[camidx0].substr(2);
     string cam1 = m_cam_names[camidx1].substr(0,1) + m_cam_names[camidx1].substr(2);
@@ -423,7 +464,7 @@ void Qing_Extrinsics_Visualizer::triangulate_chessboard(const string calibfolder
                 chessboard.push_back( Vec3f(wx/ww, wy/ww, wz/ww) );
             }
             cout << "triangulations done..\t"  << chessboard.size() << " 3d points....\t";
-            copy(chessboard.begin(), chessboard.end(), back_inserter(total_chessboard));
+            total_chessboard.push_back(chessboard);
         }
         else
         {
@@ -437,3 +478,38 @@ void Qing_Extrinsics_Visualizer::triangulate_chessboard(const string calibfolder
     }
 }
 
+void Qing_Extrinsics_Visualizer::eval_sfm_triangulation(const string evalfile)
+{
+    fstream fout(evalfile.c_str(), ios::out);
+    if(fout.is_open() == false)
+    {
+        cerr << "failed to open " << evalfile << endl;
+        return ;
+    }
+
+    fout << " stereo_name \t  " << " max_recons_err \t  " << " avg_recons_err \t  " << endl;
+    for(int i = 0; i < m_cam_num -1; i+=2)
+    {
+        string cam0 = m_cam_names[i+0].substr(0,1) + m_cam_names[i+0].substr(2);
+        string cam1 = m_cam_names[i+1].substr(0,1) + m_cam_names[i+1].substr(2);
+        string stereoname = cam0 + cam1;
+        int stereoidx = i/2;
+
+        double avg_recons_err = 0.0f;
+        double max_recons_err = 0.0f;
+
+        vector<vector<Vec3f> >& chessboard = m_chessboard_points[stereoidx];
+        int nframes = chessboard.size();
+        for(int f = 0; f < nframes ; ++f)   //frame idx
+        {
+            qing_calc_recons_error(chessboard[f], m_board_size, avg_recons_err, max_recons_err);
+        }
+
+        avg_recons_err /= (nframes * ( ( m_board_size.width - 1 ) * m_board_size.height +
+                                       m_board_size.width * (m_board_size.height - 1) ) );
+
+        fout << stereoname << " \t " << setw(10) << setprecision(6) << max_recons_err << '\t'
+             << setw(10) << setprecision(6)  << avg_recons_err << endl;
+    }
+    fout.close();
+}
