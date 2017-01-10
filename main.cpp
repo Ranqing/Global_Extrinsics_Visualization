@@ -27,15 +27,20 @@ int main(int argc, char * argv[])
     visualizer->read_sfm_extrinsics();
     visualizer->calc_camera_poses();
     visualizer->calc_camera_orientations();
+    visualizer->calc_camera_pmatrices();
 
-    string savefile = "./camera_pose.txt";
+# if 0
+    string savefile;
+    savefile = "./camera_pose.txt";
     visualizer->save_camera_poses(savefile, WITH_ORIENTATION);
     savefile = "./camera_pose.xyz";
     visualizer->save_camera_poses(savefile);
-
     savefile = "./camera_pose.ply";
     visualizer->visualizer_by_ply(savefile);
+# endif
 
+    string calibfolder = "../../../HumanDatas_20161224/calib_rectified";
+    visualizer->triangulate_chessboard(calibfolder);
 
     return 1;
 }
