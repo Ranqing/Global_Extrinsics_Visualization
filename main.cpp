@@ -23,8 +23,9 @@ int main(int argc, char * argv[])
     Qing_Extrinsics_Visualizer * visualizer = new Qing_Extrinsics_Visualizer(sfm_folder, ocv_folder, num, camnames);
 
     visualizer->read_stereo_extrinsics();
-
     visualizer->read_sfm_extrinsics();
+    visualizer->calc_sfm_scale();
+
     visualizer->calc_camera_poses();
     visualizer->calc_camera_orientations();
     visualizer->calc_camera_pmatrices();

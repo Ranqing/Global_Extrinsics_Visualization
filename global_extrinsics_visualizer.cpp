@@ -103,7 +103,7 @@ bool qing_extract_corners(const string& imgname, const Size& boardSize, vector<P
     return true;
 }
 
-void qing_calc_recons_error(vector<Vec3f>& object_points, Size board_size, double& total_recons_err, double& max_recons_err)
+void qing_calc_recons_error(const vector<Vec3f>& object_points, const Size board_size, const double& square_size, double& total_recons_err, double& max_recons_err)
 {
     int w = board_size.width;
     int h = board_size.height;
@@ -116,8 +116,8 @@ void qing_calc_recons_error(vector<Vec3f>& object_points, Size board_size, doubl
             int idx0 = i * w + j;
             int idx1 = idx0 + 1;
 
-            float dis = qing_euclidean_dis(object_points[idx1] , object_points[idx0]);
-            total_recons_err += dis;
+            float dis = abs( qing_euclidean_dis(object_points[idx1] , object_points[idx0]) - square_size );
+            total_recons_err += dis ;
 
             if(dis > max_recons_err)  max_recons_err = dis;
         }
@@ -131,14 +131,14 @@ void qing_calc_recons_error(vector<Vec3f>& object_points, Size board_size, doubl
             int idx0 = i * w + j;
             int idx1 = idx0 + w;
 
-            float dis = qing_euclidean_dis(object_points[idx1] , object_points[idx0]);
+            float dis = abs( qing_euclidean_dis(object_points[idx1] , object_points[idx0]) - square_size );
             total_recons_err += dis;
 
             if(dis > max_recons_err )  max_recons_err = dis;
         }
     }
 
-  //  cout << "max_recons_err = " << max_recons_err << endl;
+    //  cout << "max_recons_err = " << max_recons_err << endl;
 }
 
 
@@ -157,6 +157,10 @@ Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string &sfm_folder,
     m_cam_intrinsics = new Mat[m_cam_num];
     m_cam_pmatrices  = new Mat[m_cam_num];
 
+    m_stereo_num = m_cam_num / 2;
+    m_stereo_rotations = new Mat[m_stereo_num];
+    m_stereo_translations = new Mat[m_stereo_num];
+
     for(int i = 0; i < m_cam_num; ++i)
     {
         m_cam_names[i] = names[i];
@@ -166,16 +170,41 @@ Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string &sfm_folder,
 
 Qing_Extrinsics_Visualizer::~Qing_Extrinsics_Visualizer()
 {
-    if(m_cam_names != NULL)         { delete[] m_cam_names; m_cam_names = NULL;}
-    if(m_rotations != NULL)         { delete[] m_rotations; m_rotations = NULL;}
-    if(m_translations != NULL)      { delete[] m_translations; m_translations = NULL; }
-    if(m_cam_poses != NULL)         { delete[] m_cam_poses; m_cam_poses = NULL;}
-    if(m_cam_orientations != NULL)  { delete[] m_cam_orientations; m_cam_orientations = NULL; }
+    if(m_cam_names != NULL)            { delete[] m_cam_names; m_cam_names = NULL;}
+    if(m_rotations != NULL)            { delete[] m_rotations; m_rotations = NULL;}
+    if(m_translations != NULL)         { delete[] m_translations; m_translations = NULL; }
+    if(m_cam_poses != NULL)            { delete[] m_cam_poses; m_cam_poses = NULL;}
+    if(m_cam_orientations != NULL)     { delete[] m_cam_orientations; m_cam_orientations = NULL; }
 
-    if(m_cam_intrinsics != NULL)    { delete[] m_cam_intrinsics; m_cam_intrinsics = NULL; }
-    if(m_cam_pmatrices != NULL)     { delete[] m_cam_pmatrices;  m_cam_pmatrices = NULL;  }
+    if(m_cam_intrinsics != NULL)       { delete[] m_cam_intrinsics; m_cam_intrinsics = NULL; }
+    if(m_cam_pmatrices != NULL)        { delete[] m_cam_pmatrices;  m_cam_pmatrices = NULL;  }
+
+    if(m_stereo_rotations != NULL)     { delete[] m_stereo_rotations; m_stereo_rotations = NULL; }
+    if(m_stereo_translations != NULL)  { delete[] m_stereo_translations; m_stereo_translations = NULL; }
 }
 
+void Qing_Extrinsics_Visualizer::read_stereo_extrinsics()
+{
+    cout << "here is read stereo extrinsics.." << endl;
+    for(int i = 0; i < m_cam_num - 1; i+=2)
+    {
+        string stereoname = m_cam_names[i+0].substr(0,1) + m_cam_names[i+0].substr(2) +
+                m_cam_names[i+1].substr(0,1) + m_cam_names[i+1].substr(2);
+        string filename = m_ocv_folder + "/stereo_" + stereoname + ".yml";
+        Mat rotation, translation;
+
+        qing_read_stereo_yml_rt(filename, rotation, translation);
+
+        int stereoidx = i/2;
+        m_stereo_rotations[stereoidx] = rotation.clone();
+        m_stereo_translations[stereoidx] = translation.clone();
+#if 0
+        cout << stereoname  << endl;
+        cout << rotation    << endl;
+        cout << translation << endl;
+#endif
+    }
+}
 
 //known: openmvg data: p_world_coord = rotation.inv() * p_cam_coord + translation
 //
@@ -201,6 +230,46 @@ void Qing_Extrinsics_Visualizer::read_sfm_extrinsics()
         cout << m_rotations[i] << endl << m_translations[i] << endl;
 # endif
     }
+}
+
+//sfm:
+//cam_coord_1 = R1 * world_coord_1 + T1
+//cam_coord_2 = R2 * world_coord_2 + T2
+//opencv:
+//cam_coord_2 = R * cam_coord_1 + T
+//R = R2 * R1'
+//T = T2 - R * T1 , i.e. T2 - R2 * R1' * T1
+void Qing_Extrinsics_Visualizer::calc_sfm_scale()
+{
+    m_sfm_scale = 0;
+    for(int i = 0; i < m_cam_num - 1; i += 2)
+    {
+        string cam0 = m_cam_names[i+0].substr(0,1) + m_cam_names[i+0].substr(2);
+        string cam1 = m_cam_names[i+1].substr(0,1) + m_cam_names[i+1].substr(2);
+
+        Mat R1 = m_rotations[i+0];
+        Mat R2 = m_rotations[i+1];
+        Mat T1 = m_translations[i+0];
+        Mat T2 = m_translations[i+1];
+
+        Mat sfm_R = R2 * R1.t();
+        Mat sfm_T = T2 - sfm_R * T1;
+        Mat ocv_T = m_stereo_translations[i/2] ;
+
+        double * sfm_data = (double *)sfm_T.ptr<double>(0);
+        double * ocv_data = (double *)ocv_T.ptr<double>(0);
+        double norm_sfm_t = qing_norm_vec_3(sfm_data);
+        double norm_ocv_t = qing_norm_vec_3(ocv_data);
+
+        string stereoname = cam0 + cam1;
+        cout << stereoname << ": " << endl ;
+        cout << "sfm : " << sfm_T.t() << endl;
+        cout << "ocv : " << ocv_T.t() << endl;
+        cout << "sfm / ocv scale = " << norm_sfm_t / norm_ocv_t << endl;
+        m_sfm_scale += norm_sfm_t / norm_ocv_t;
+    }
+    m_sfm_scale /= m_stereo_num;
+    cout << "sfm scale = " << m_sfm_scale << endl;
 }
 
 void Qing_Extrinsics_Visualizer::calc_camera_pmatrices()
@@ -271,26 +340,6 @@ void Qing_Extrinsics_Visualizer::save_camera_poses(const string& filename, int w
     }
     fout.close();
     cout << "saving " << filename << " done." << endl;
-}
-
-
-void Qing_Extrinsics_Visualizer::read_stereo_extrinsics()
-{
-    cout << "here is read stereo extrinsics.." << endl;
-    for(int i = 0; i < m_cam_num - 1; i+=2)
-    {
-        string stereoname = m_cam_names[i+0].substr(0,1) + m_cam_names[i+0].substr(2) +
-                m_cam_names[i+1].substr(0,1) + m_cam_names[i+1].substr(2);
-        string filename = m_ocv_folder + "/stereo_" + stereoname + ".yml";
-        Mat rotation, translation;
-
-        qing_read_stereo_yml_rt(filename, rotation, translation);
-#if 0
-        cout << stereoname  << endl;
-        cout << rotation    << endl;
-        cout << translation << endl;
-#endif
-    }
 }
 
 #define STEP 0.005
@@ -478,6 +527,8 @@ void Qing_Extrinsics_Visualizer::sfm_triangulate_chessboard(const string calibfo
     }
 }
 
+#define CV_SQUARESIZE 20    //mm
+
 void Qing_Extrinsics_Visualizer::eval_sfm_triangulation(const string evalfile)
 {
     fstream fout(evalfile.c_str(), ios::out);
@@ -487,13 +538,21 @@ void Qing_Extrinsics_Visualizer::eval_sfm_triangulation(const string evalfile)
         return ;
     }
 
+    //calculate chessboard square size according sfm_scale
+    double ocv_squaresize = CV_SQUARESIZE;
+    double sfm_squaresize = m_sfm_scale * ocv_squaresize;
+    cout << "evaluate sfm triangulation, sfm_squaresize =  " << sfm_squaresize << endl;
+
     fout << " stereo_name \t  " << " max_recons_err \t  " << " avg_recons_err \t  " << endl;
     for(int i = 0; i < m_cam_num -1; i+=2)
     {
+        int stereoidx = i/2;
+
         string cam0 = m_cam_names[i+0].substr(0,1) + m_cam_names[i+0].substr(2);
         string cam1 = m_cam_names[i+1].substr(0,1) + m_cam_names[i+1].substr(2);
         string stereoname = cam0 + cam1;
-        int stereoidx = i/2;
+
+        qing_set_chessboard_size(cam0, m_board_size);
 
         double avg_recons_err = 0.0f;
         double max_recons_err = 0.0f;
@@ -502,7 +561,7 @@ void Qing_Extrinsics_Visualizer::eval_sfm_triangulation(const string evalfile)
         int nframes = chessboard.size();
         for(int f = 0; f < nframes ; ++f)   //frame idx
         {
-            qing_calc_recons_error(chessboard[f], m_board_size, avg_recons_err, max_recons_err);
+            qing_calc_recons_error(chessboard[f], m_board_size, sfm_squaresize, avg_recons_err, max_recons_err);
         }
 
         avg_recons_err /= (nframes * ( ( m_board_size.width - 1 ) * m_board_size.height +
