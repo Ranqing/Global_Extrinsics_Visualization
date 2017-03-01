@@ -1,7 +1,8 @@
 #include "global_extrinsics_visualizer.h"
 
 #include "../../../Qing/qing_string.h"
-#include "../../../Qing/qing_basic.h"
+#include "../../../Qing/qing_projection.h"
+#include "../../../Qing/qing_norm.h"
 #include "../../../Qing/qing_io.h"
 #include "../../../Qing/qing_ply.h"
 #include "../../../Qing/qing_dir.h"
@@ -58,13 +59,6 @@ void qing_read_sfm_pmatrix(const string filename, Mat& intrinsic, Mat& rotation,
     memcpy(rotation.data, rdata, sizeof(double)*9);
     translation.create(3,1,CV_64FC1);
     memcpy(translation.data, tdata, sizeof(double)*3);
-}
-
-
-Mat qing_cam_coord_to_world_coord(const Mat& rotation, const Mat& translation, const Mat& c_coord)
-{
-    Mat w_coord = rotation.t() * (c_coord - translation);
-    return w_coord;
 }
 
 #define BOARD_W 14
@@ -142,20 +136,20 @@ void qing_calc_recons_error(const vector<Vec3f>& object_points, const Size board
 }
 
 
-Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string &sfm_folder, const string &ocv_folder, const int num, const string *names):
-    m_sfm_folder(sfm_folder), m_ocv_folder(ocv_folder), m_cam_num(num)
+Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string& sfm_folder, const string& ocv_folder, const string& out_folder, const int num, const string * names):
+    m_sfm_folder(sfm_folder), m_ocv_folder(ocv_folder), m_out_folder(out_folder), m_cam_num(num)
 {
     cout << "sfm result folder: "    << m_sfm_folder  << endl;
     cout << "ocv result folder: "    << m_ocv_folder   << endl;
     cout << "camera num: "           << m_cam_num     << endl;
 
     m_cam_names = new string[m_cam_num];
-    m_rotations = new Mat[m_cam_num];
-    m_translations = new Mat[m_cam_num];
-    m_cam_poses = new Mat[m_cam_num];
-    m_cam_orientations = new Mat[m_cam_num];
-    m_cam_intrinsics = new Mat[m_cam_num];
-    m_cam_pmatrices  = new Mat[m_cam_num];
+    m_sfm_rotations = new Mat[m_cam_num];
+    m_sfm_translations = new Mat[m_cam_num];
+    m_sfm_cam_poses = new Mat[m_cam_num];
+    m_sfm_cam_orientations = new Mat[m_cam_num];
+    m_sfm_cam_intrinsics = new Mat[m_cam_num];
+    m_sfm_cam_pmatrices  = new Mat[m_cam_num];
 
     m_stereo_num = m_cam_num / 2;
     m_stereo_rotations = new Mat[m_stereo_num];
@@ -171,13 +165,13 @@ Qing_Extrinsics_Visualizer::Qing_Extrinsics_Visualizer(const string &sfm_folder,
 Qing_Extrinsics_Visualizer::~Qing_Extrinsics_Visualizer()
 {
     if(m_cam_names != NULL)            { delete[] m_cam_names; m_cam_names = NULL;}
-    if(m_rotations != NULL)            { delete[] m_rotations; m_rotations = NULL;}
-    if(m_translations != NULL)         { delete[] m_translations; m_translations = NULL; }
-    if(m_cam_poses != NULL)            { delete[] m_cam_poses; m_cam_poses = NULL;}
-    if(m_cam_orientations != NULL)     { delete[] m_cam_orientations; m_cam_orientations = NULL; }
+    if(m_sfm_rotations != NULL)            { delete[] m_sfm_rotations; m_sfm_rotations = NULL;}
+    if(m_sfm_translations != NULL)         { delete[] m_sfm_translations; m_sfm_translations = NULL; }
+    if(m_sfm_cam_poses != NULL)            { delete[] m_sfm_cam_poses; m_sfm_cam_poses = NULL;}
+    if(m_sfm_cam_orientations != NULL)     { delete[] m_sfm_cam_orientations; m_sfm_cam_orientations = NULL; }
 
-    if(m_cam_intrinsics != NULL)       { delete[] m_cam_intrinsics; m_cam_intrinsics = NULL; }
-    if(m_cam_pmatrices != NULL)        { delete[] m_cam_pmatrices;  m_cam_pmatrices = NULL;  }
+    if(m_sfm_cam_intrinsics != NULL)       { delete[] m_sfm_cam_intrinsics; m_sfm_cam_intrinsics = NULL; }
+    if(m_sfm_cam_pmatrices != NULL)        { delete[] m_sfm_cam_pmatrices;  m_sfm_cam_pmatrices = NULL;  }
 
     if(m_stereo_rotations != NULL)     { delete[] m_stereo_rotations; m_stereo_rotations = NULL; }
     if(m_stereo_translations != NULL)  { delete[] m_stereo_translations; m_stereo_translations = NULL; }
@@ -198,12 +192,13 @@ void Qing_Extrinsics_Visualizer::read_stereo_extrinsics()
         int stereoidx = i/2;
         m_stereo_rotations[stereoidx] = rotation.clone();
         m_stereo_translations[stereoidx] = translation.clone();
-#if 0
+#if QING_DEBUG
         cout << stereoname  << endl;
         cout << rotation    << endl;
         cout << translation << endl;
 #endif
     }
+    cout << "read opencv stereo extrinsics done..." << endl;
 }
 
 //known: openmvg data: p_world_coord = rotation.inv() * p_cam_coord + translation
@@ -217,19 +212,20 @@ void Qing_Extrinsics_Visualizer::read_sfm_extrinsics()
         Mat intrinsic;
         qing_read_sfm_pmatrix(filename, intrinsic, rotation, translation);
 
-        m_cam_intrinsics[i] = intrinsic;
+        m_sfm_cam_intrinsics[i] = intrinsic;
 
         //openmvg:
         //p_world_coord = rotation.inv() * p_cam_coord + translation <==> p_cam_coord = rotation * p_world_coord - rotation * translation
-        m_rotations[i] = rotation;
-        m_translations[i] = -(rotation * translation);
+        m_sfm_rotations[i] = rotation;
+        m_sfm_translations[i] = -(rotation * translation);
 
-# if 0
+# if QING_DEBUG
         cout << m_cam_names[i] <<" : " << endl ;
-        cout << m_cam_intrinsics[i] << endl;
-        cout << m_rotations[i] << endl << m_translations[i] << endl;
+        cout << m_sfm_cam_intrinsics[i] << endl;
+        cout << m_sfm_rotations[i] << endl << m_sfm_translations[i] << endl;
 # endif
     }
+    cout << "read sfm extrinsics done..." << endl;
 }
 
 //sfm:
@@ -241,16 +237,17 @@ void Qing_Extrinsics_Visualizer::read_sfm_extrinsics()
 //T = T2 - R * T1 , i.e. T2 - R2 * R1' * T1
 void Qing_Extrinsics_Visualizer::calc_sfm_scale()
 {
+    cout << "calculate scale of sfm to opencv....T(sfm)/T(opencv)" << endl;
     m_sfm_scale = 0;
     for(int i = 0; i < m_cam_num - 1; i += 2)
     {
         string cam0 = m_cam_names[i+0].substr(0,1) + m_cam_names[i+0].substr(2);
         string cam1 = m_cam_names[i+1].substr(0,1) + m_cam_names[i+1].substr(2);
 
-        Mat R1 = m_rotations[i+0];
-        Mat R2 = m_rotations[i+1];
-        Mat T1 = m_translations[i+0];
-        Mat T2 = m_translations[i+1];
+        Mat R1 = m_sfm_rotations[i+0];
+        Mat R2 = m_sfm_rotations[i+1];
+        Mat T1 = m_sfm_translations[i+0];
+        Mat T2 = m_sfm_translations[i+1];
 
         Mat sfm_R = R2 * R1.t();
         Mat sfm_T = T2 - sfm_R * T1;
@@ -265,74 +262,88 @@ void Qing_Extrinsics_Visualizer::calc_sfm_scale()
         cout << stereoname << ": " << endl ;
         cout << "sfm : " << sfm_T.t() << endl;
         cout << "ocv : " << ocv_T.t() << endl;
-        cout << "sfm / ocv scale = " << norm_sfm_t / norm_ocv_t << endl;
+        cout << "sfm / ocv scale = " << norm_sfm_t / norm_ocv_t << endl << endl;
         m_sfm_scale += norm_sfm_t / norm_ocv_t;
     }
     m_sfm_scale /= m_stereo_num;
     cout << "sfm scale = " << m_sfm_scale << endl;
 }
 
-void Qing_Extrinsics_Visualizer::calc_camera_pmatrices()
-{
-    for(int i = 0; i < m_cam_num; ++i)
-    {
-        double p[12];
-        double * rdata  = (double *)m_rotations[i].ptr<double>(0);
-        double * tdata  = (double *)m_translations[i].ptr<double>(0);
+//combined sfm results with stereo results
+//R = R2 * R1'
+//T = T2 - R * T1 , i.e. T2 - R2 * R1' * T1
+void Qing_Extrinsics_Visualizer::calc_mixed_extrinsics() {
+    m_mixed_rotations = new Mat[m_cam_num];
+    m_mixed_translations = new Mat[m_cam_num];
+    m_mixed_cam_poses = new Mat[m_cam_num];
+    m_mixed_cam_pmatrices = new Mat[m_cam_num];
 
-        p[0] = rdata[0] ;   p[1] = rdata[1] ;   p[2] = rdata[2] ;  p[3] = tdata[0];
-        p[4] = rdata[3] ;   p[5] = rdata[4] ;   p[6] = rdata[5] ;  p[7] = tdata[1];
-        p[8] = rdata[6] ;   p[9] = rdata[7] ;   p[10] = rdata[8] ; p[11] = tdata[2];
+    cout << "calc_mixed_extrinsics...." << endl;
+    for(int i = 0, stereo_idx = 0; i < m_cam_num - 1;  i+=2) {
+        m_mixed_rotations[i] = m_sfm_rotations[i];
+        m_mixed_translations[i] = m_sfm_translations[i];
 
-        m_cam_pmatrices[i].create(3, 4, CV_64FC1);
-        memcpy(m_cam_pmatrices[i].data, p, sizeof(double)*12);
+        Mat stereo_rotation = m_stereo_rotations[stereo_idx];
+        Mat stereo_translation = m_stereo_translations[stereo_idx] * m_sfm_scale;
 
-        cout << m_cam_names[i] << " : " << endl << m_cam_pmatrices[i] << endl;
+        cout << stereo_idx << ":" << m_stereo_translations[stereo_idx].t() << " -> " << stereo_translation.t() << endl;
+
+
+        stereo_idx ++;
     }
 }
 
-void Qing_Extrinsics_Visualizer::calc_camera_poses()
+void Qing_Extrinsics_Visualizer::calc_sfm_camera_pmatrices()
 {
     for(int i = 0; i < m_cam_num; ++i)
     {
-        double * rdata  = (double *)m_rotations[i].ptr<double>(0);
-        double * tdata  = (double *)m_translations[i].ptr<double>(0);
-        double * center = qing_calc_cam_center(rdata, tdata);              //center in qing_calc_cam_center must be create by 'new', or data in this memory will be freshed by 'create' then
+        qing_calc_pmatrix_from_rt(m_sfm_cam_pmatrices[i], m_sfm_rotations[i], m_sfm_translations[i]);
 
-        m_cam_poses[i].create(3,1,CV_64FC1);
-        memcpy(m_cam_poses[i].data, center, sizeof(double)*3);
-#if 0
-        cout << m_cam_names[i] << " : " << m_cam_poses[i].t() << endl;
+# if QING_DEBUG
+        cout << m_cam_names[i] << " pmatrix : " << endl << m_sfm_cam_pmatrices[i] << endl;
+# endif
+    }
+}
+
+void Qing_Extrinsics_Visualizer::calc_sfm_camera_poses()
+{
+    for(int i = 0; i < m_cam_num; ++i)
+    {
+        qing_calc_cam_center_from_rt(m_sfm_cam_poses[i], m_sfm_rotations[i], m_sfm_translations[i]);
+
+#if QING_DEBUG
+        cout << m_cam_names[i] << " center : " << m_sfm_cam_poses[i].t() << endl;
 #endif
-        delete[] center;
     }
 }
 
-void Qing_Extrinsics_Visualizer::calc_camera_orientations()
+//position of an unit in z-axis to be shown in world coordinates
+void Qing_Extrinsics_Visualizer::calc_sfm_camera_orientations()
 { 
     for(int i = 0; i < m_cam_num; ++i)
     {
-        Mat c_coord = (Mat_<double>(3,1) << 1.0, 0.0, 0.0);                                              //camera_coord
-        Mat w_coord = qing_cam_coord_to_world_coord(m_rotations[i], m_translations[i], c_coord) ;        //m_rotations[i].t() * (c_coord - m_translations[i]);
+        Mat c_coord = (Mat_<double>(3,1) << 1.0, 0.0, 0.0);                                                      //camera_coord
+        Mat w_coord = qing_cam_coord_to_world_coord(m_sfm_rotations[i], m_sfm_translations[i], c_coord) ;        //m_rotations[i].t() * (c_coord - m_translations[i]);
 
-        m_cam_orientations[i] = w_coord.clone();
-# if 0
-        cout << m_cam_names[i] << " orientation: " << m_cam_orientations[i].t() << endl;
+        m_sfm_cam_orientations[i] = w_coord.clone();
+
+# if QING_DEBUG
+        cout << m_cam_names[i] << " orientation: " << m_sfm_cam_orientations[i].t() << endl;
 #endif
     }
 }
 
-void Qing_Extrinsics_Visualizer::save_camera_poses(const string& filename, int with_orientation /*= true*/)
+void Qing_Extrinsics_Visualizer::save_sfm_camera_poses(const string& filename, int with_orientation /*= true*/)
 {
     fstream fout(filename.c_str(), ios::out);
     for(int i = 0; i < m_cam_num; ++i)
     {
-        double * pdata = (double *)m_cam_poses[i].ptr<double>(0);
+        double * pdata = (double *)m_sfm_cam_poses[i].ptr<double>(0);
         fout << pdata[0] << ' ' << pdata[1] << ' ' << pdata[2] << ' ';
 
         if(with_orientation)
         {
-            pdata = (double *)m_cam_orientations[i].ptr<double>(0);
+            pdata = (double *)m_sfm_cam_orientations[i].ptr<double>(0);
             fout << pdata[0] << ' ' << pdata[1] << ' ' << pdata[2] << ' ';
         }
 
@@ -344,7 +355,7 @@ void Qing_Extrinsics_Visualizer::save_camera_poses(const string& filename, int w
 
 #define STEP 0.005
 
-void Qing_Extrinsics_Visualizer::calc_axes_points()
+void Qing_Extrinsics_Visualizer::calc_axes_points(Mat * vec_rotation, Mat * vec_translation, const int vec_len)
 {
     m_xaxis_points.clear();
     m_yaxis_points.clear();
@@ -354,10 +365,10 @@ void Qing_Extrinsics_Visualizer::calc_axes_points()
     int ypointsize = 0.075/STEP;
     int zpointsize = 0.075/STEP;
 
-    for(int c = 0; c < m_cam_num; c++)
+    for(int c = 0; c < vec_len; c++)
     {
-        Mat rotation = m_rotations[c];
-        Mat translation = m_translations[c];
+        Mat rotation = vec_rotation[c];
+        Mat translation = vec_translation[c];
 
         //x-axis
         double cur = 0.0;
@@ -392,14 +403,20 @@ void Qing_Extrinsics_Visualizer::calc_axes_points()
             m_zaxis_points.push_back(Vec3f(wdata[0], wdata[1], wdata[2]));
         }
     }
+# if QING_DEBUG
     cout << "x-axis point size: " << m_xaxis_points.size() << endl;
     cout << "y-axis point size: " << m_yaxis_points.size() << endl;
     cout << "z-axis point size: " << m_zaxis_points.size() << endl;
+# endif
 }
 
-void Qing_Extrinsics_Visualizer::visualizer_by_ply(const string& plyname)
+void Qing_Extrinsics_Visualizer::visualizer_sfm_by_ply(const string& plyname)
 {
-    calc_axes_points();
+    calc_axes_points(m_sfm_rotations, m_sfm_translations, m_cam_num);
+    save_axes_points(plyname);
+}
+
+void Qing_Extrinsics_Visualizer::save_axes_points(const string &plyname) {
     vector<Vec3f> all_points(0);
     vector<Vec3f> all_colors(0);
 
@@ -426,6 +443,7 @@ void Qing_Extrinsics_Visualizer::visualizer_by_ply(const string& plyname)
     }
 
     qing_write_point_color_ply(plyname, all_points, all_colors);
+    cout << "saving " << plyname << " done." << endl;
 }
 
 void Qing_Extrinsics_Visualizer::sfm_triangulate_chessboard(const string calibfolder)
@@ -460,13 +478,13 @@ void Qing_Extrinsics_Visualizer::sfm_triangulate_chessboard(const string calibfo
         return ;
     }
 
-    string outdir = "./" + cam0 + cam1 ;
+    string outdir = m_out_folder + "/" + cam0 + cam1 ;
     qing_create_dir(outdir);
     qing_set_chessboard_size(cam0, m_board_size);
 
     // two projection matrix
-    Mat P0 = m_cam_intrinsics[camidx0] * m_cam_pmatrices[camidx0];
-    Mat P1 = m_cam_intrinsics[camidx1] * m_cam_pmatrices[camidx1];
+    Mat P0 = m_sfm_cam_intrinsics[camidx0] * m_sfm_cam_pmatrices[camidx0];
+    Mat P1 = m_sfm_cam_intrinsics[camidx1] * m_sfm_cam_pmatrices[camidx1];
     P0.convertTo(P0, CV_32FC1);
     P1.convertTo(P1, CV_32FC1);
     cout << cam0 << endl << P0 << endl;
@@ -567,8 +585,8 @@ void Qing_Extrinsics_Visualizer::eval_sfm_triangulation(const string evalfile)
         avg_recons_err /= (nframes * ( ( m_board_size.width - 1 ) * m_board_size.height +
                                        m_board_size.width * (m_board_size.height - 1) ) );
 
-        fout << stereoname << " \t " << setw(10) << setprecision(6) << max_recons_err << '\t'
-             << setw(10) << setprecision(6)  << avg_recons_err << endl;
+        fout << stereoname << " \t " << setw(10) << setprecision(6) << max_recons_err/m_sfm_scale << '\t'
+             << setw(10) << setprecision(6)  << avg_recons_err/m_sfm_scale << endl;                                            //max_recons_err * ocv_squaresize
     }
     fout.close();
 }
