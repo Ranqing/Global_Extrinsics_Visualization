@@ -41,7 +41,7 @@ int main(int argc, char * argv[])
     visualizer->calc_sfm_camera_pmatrices();
 
 #if 1
-    //only valid for initial
+    //only valid for initial sfm
     string mixed_result_folder = result_folder + "_mixed";
     cout << mixed_result_folder << endl;
     qing_create_dir(mixed_result_folder);
