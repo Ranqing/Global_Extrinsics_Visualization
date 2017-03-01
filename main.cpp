@@ -41,8 +41,19 @@ int main(int argc, char * argv[])
     visualizer->calc_sfm_camera_pmatrices();
 
 #if 1
+    //only valid for initial
+    string mixed_result_folder = result_folder + "_mixed";
+    cout << mixed_result_folder << endl;
+    qing_create_dir(mixed_result_folder);
     visualizer->calc_mixed_extrinsics();
 
+    string savefile;
+    savefile = mixed_result_folder + "/camera_mixed_pose.txt";
+    visualizer->save_mixed_camera_poses(savefile, false);
+    savefile = mixed_result_folder + "/camera_mixed_pose.xyz";
+    visualizer->save_mixed_camera_poses(savefile);
+    savefile = mixed_result_folder + "/camera_mixed_pose.ply";
+    visualizer->visualizer_mixed_by_ply(savefile);
 #endif
 
 # if 0

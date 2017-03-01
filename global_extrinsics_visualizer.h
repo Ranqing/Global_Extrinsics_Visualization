@@ -44,6 +44,7 @@ public:
     cv::Mat * m_mixed_translations;
     cv::Mat * m_mixed_cam_poses;
     cv::Mat * m_mixed_cam_pmatrices;
+    cv::Mat * m_mixed_cam_orientations;
 
     void read_stereo_extrinsics();
 
@@ -55,12 +56,17 @@ public:
     void save_sfm_camera_poses(const string& filename, int with_orientation = false);
 
     void calc_mixed_extrinsics();
+    void calc_mixed_camera_pmatrices();
+    void calc_mixed_camera_poses();
+    void calc_mixed_camera_orientations();
+    void save_mixed_camera_poses(const string& filename, int with_orientation = false);
 
     vector<cv::Vec3f> m_xaxis_points, m_yaxis_points, m_zaxis_points;
     void calc_axes_points(Mat * vec_rotation, Mat * vec_translation, const int vec_len);
     void save_axes_points(const string &plyname);
 
     void visualizer_sfm_by_ply(const string& plyname);
+    void visualizer_mixed_by_ply(const string& plyname);
 
 
 # if EVAL

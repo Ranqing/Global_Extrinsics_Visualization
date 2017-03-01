@@ -269,29 +269,6 @@ void Qing_Extrinsics_Visualizer::calc_sfm_scale()
     cout << "sfm scale = " << m_sfm_scale << endl;
 }
 
-//combined sfm results with stereo results
-//R = R2 * R1'
-//T = T2 - R * T1 , i.e. T2 - R2 * R1' * T1
-void Qing_Extrinsics_Visualizer::calc_mixed_extrinsics() {
-    m_mixed_rotations = new Mat[m_cam_num];
-    m_mixed_translations = new Mat[m_cam_num];
-    m_mixed_cam_poses = new Mat[m_cam_num];
-    m_mixed_cam_pmatrices = new Mat[m_cam_num];
-
-    cout << "calc_mixed_extrinsics...." << endl;
-    for(int i = 0, stereo_idx = 0; i < m_cam_num - 1;  i+=2) {
-        m_mixed_rotations[i] = m_sfm_rotations[i];
-        m_mixed_translations[i] = m_sfm_translations[i];
-
-        Mat stereo_rotation = m_stereo_rotations[stereo_idx];
-        Mat stereo_translation = m_stereo_translations[stereo_idx] * m_sfm_scale;
-
-        cout << stereo_idx << ":" << m_stereo_translations[stereo_idx].t() << " -> " << stereo_translation.t() << endl;
-
-
-        stereo_idx ++;
-    }
-}
 
 void Qing_Extrinsics_Visualizer::calc_sfm_camera_pmatrices()
 {
@@ -319,7 +296,7 @@ void Qing_Extrinsics_Visualizer::calc_sfm_camera_poses()
 
 //position of an unit in z-axis to be shown in world coordinates
 void Qing_Extrinsics_Visualizer::calc_sfm_camera_orientations()
-{ 
+{
     for(int i = 0; i < m_cam_num; ++i)
     {
         Mat c_coord = (Mat_<double>(3,1) << 1.0, 0.0, 0.0);                                                      //camera_coord
@@ -333,7 +310,7 @@ void Qing_Extrinsics_Visualizer::calc_sfm_camera_orientations()
     }
 }
 
-void Qing_Extrinsics_Visualizer::save_sfm_camera_poses(const string& filename, int with_orientation /*= true*/)
+void Qing_Extrinsics_Visualizer::save_sfm_camera_poses(const string& filename, int with_orientation /*= false*/)
 {
     fstream fout(filename.c_str(), ios::out);
     for(int i = 0; i < m_cam_num; ++i)
@@ -352,6 +329,107 @@ void Qing_Extrinsics_Visualizer::save_sfm_camera_poses(const string& filename, i
     fout.close();
     cout << "saving " << filename << " done." << endl;
 }
+
+
+//---------------------------------------------------------mixed-------------------------------------------------------------//
+
+//combined sfm results with stereo results
+//R = R2 * R1' --> R2 = R * R1
+//T = T2 - R * T1 , i.e. T2 - R2 * R1' * T1  --> T2 = T + R * T1
+void Qing_Extrinsics_Visualizer::calc_mixed_extrinsics() {
+    m_mixed_rotations = new Mat[m_cam_num];
+    m_mixed_translations = new Mat[m_cam_num];
+    m_mixed_cam_poses = new Mat[m_cam_num];
+    m_mixed_cam_pmatrices = new Mat[m_cam_num];
+    m_mixed_cam_orientations = new Mat[m_cam_num];
+
+    cout << "calc_mixed_extrinsics...." << endl;
+    for(int i = 0, stereo_idx = 0; i < m_cam_num - 1;  i+=2) {
+        m_mixed_rotations[i] = m_sfm_rotations[i];
+        m_mixed_translations[i] = m_sfm_translations[i];
+
+        Mat stereo_rotation = m_stereo_rotations[stereo_idx];
+        Mat stereo_translation = m_stereo_translations[stereo_idx] * m_sfm_scale;
+
+        // cout << stereo_idx << ":" << m_stereo_translations[stereo_idx].t() << " -> " << stereo_translation.t() << endl;
+
+        m_mixed_rotations[i+1] = stereo_rotation * m_mixed_rotations[i];
+        m_mixed_translations[i+1] = stereo_translation + stereo_rotation * m_mixed_translations[i];
+
+        cout << stereo_idx << ": " << endl;
+        cout << "left_cam: " << endl;
+        cout << m_mixed_rotations[i] << endl;
+        cout << m_mixed_translations[i].t() << endl;
+        cout << "right_cam: " << endl;
+        cout << m_mixed_rotations[i+1] << endl;
+        cout << m_mixed_translations[i+1].t() << endl;
+        stereo_idx ++;
+    }
+    cout << endl;
+
+    calc_mixed_camera_poses();
+    calc_mixed_camera_pmatrices();
+    calc_mixed_camera_orientations();
+}
+
+void Qing_Extrinsics_Visualizer::calc_mixed_camera_pmatrices() {
+    for(int i = 0; i < m_cam_num; ++i)
+    {
+        qing_calc_pmatrix_from_rt(m_mixed_cam_pmatrices[i], m_mixed_rotations[i], m_mixed_translations[i]);
+
+# if QING_DEBUG
+        cout << m_cam_names[i] << " pmatrix : " << endl << m_mixed_cam_pmatrices[i] << endl;
+# endif
+    }
+}
+
+void Qing_Extrinsics_Visualizer::calc_mixed_camera_poses() {
+    for(int i = 0; i < m_cam_num; ++i)
+    {
+        qing_calc_cam_center_from_rt(m_mixed_cam_poses[i], m_mixed_rotations[i], m_mixed_translations[i]);
+
+#if QING_DEBUG
+        cout << m_cam_names[i] << " center : " << m_mixed_cam_poses[i].t() << endl;
+#endif
+    }
+}
+
+//position of an unit in z-axis to be shown in world coordinates
+void Qing_Extrinsics_Visualizer::calc_mixed_camera_orientations()
+{
+    for(int i = 0; i < m_cam_num; ++i)
+    {
+        Mat c_coord = (Mat_<double>(3,1) << 1.0, 0.0, 0.0);                                                      //camera_coord
+        Mat w_coord = qing_cam_coord_to_world_coord(m_mixed_rotations[i], m_mixed_translations[i], c_coord) ;        //m_rotations[i].t() * (c_coord - m_translations[i]);
+
+        m_mixed_cam_orientations[i] = w_coord.clone();
+
+# if QING_DEBUG
+        cout << m_cam_names[i] << " orientation: " << m_mixed_cam_orientations[i].t() << endl;
+#endif
+    }
+}
+
+void Qing_Extrinsics_Visualizer::save_mixed_camera_poses(const string& filename, int with_orientation /*= false*/)
+{
+    fstream fout(filename.c_str(), ios::out);
+    for(int i = 0; i < m_cam_num; ++i)
+    {
+        double * pdata = (double *)m_mixed_cam_poses[i].ptr<double>(0);
+        fout << pdata[0] << ' ' << pdata[1] << ' ' << pdata[2] << ' ';
+
+        if(with_orientation)
+        {
+            pdata = (double *)m_mixed_cam_orientations[i].ptr<double>(0);
+            fout << pdata[0] << ' ' << pdata[1] << ' ' << pdata[2] << ' ';
+        }
+
+        fout << endl;
+    }
+    fout.close();
+    cout << "saving " << filename << " done." << endl;
+}
+
 
 #define STEP 0.005
 
@@ -413,6 +491,11 @@ void Qing_Extrinsics_Visualizer::calc_axes_points(Mat * vec_rotation, Mat * vec_
 void Qing_Extrinsics_Visualizer::visualizer_sfm_by_ply(const string& plyname)
 {
     calc_axes_points(m_sfm_rotations, m_sfm_translations, m_cam_num);
+    save_axes_points(plyname);
+}
+
+void Qing_Extrinsics_Visualizer::visualizer_mixed_by_ply(const string &plyname) {
+    calc_axes_points(m_mixed_rotations, m_mixed_translations, m_cam_num);
     save_axes_points(plyname);
 }
 
