@@ -22,7 +22,7 @@ int main(int argc, char * argv[])
     string sfm_folder = argv[1];
     string ocv_folder = argv[2];
 
-    string result_folder = "../visualization/";
+    string result_folder = "../visualization_new/";
     qing_create_dir(result_folder);
     result_folder = result_folder + qing_get_last_folder_from_full_path(sfm_folder);
     qing_create_dir(result_folder);
@@ -49,7 +49,7 @@ int main(int argc, char * argv[])
 
     string savefile;
     savefile = mixed_result_folder + "/camera_mixed_pose.txt";
-    visualizer->save_mixed_camera_poses(savefile, false);
+    visualizer->save_mixed_camera_poses(savefile, WITH_ORIENTATION);
     savefile = mixed_result_folder + "/camera_mixed_pose.xyz";
     visualizer->save_mixed_camera_poses(savefile);
     savefile = mixed_result_folder + "/camera_mixed_pose.ply";
